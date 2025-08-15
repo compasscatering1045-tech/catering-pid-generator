@@ -30,13 +30,19 @@
 const chromium = require('chrome-aws-lambda');
 
 module.exports = async (req, res) => {
-  // Enable CORS
+  // Enable CORS for all origins
+  res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
 
+  // Handle preflight request
   if (req.method === 'OPTIONS') {
-    return res.status(200).end();
+    res.status(200).end();
+    return;
   }
 
   if (req.method !== 'POST') {
@@ -45,6 +51,10 @@ module.exports = async (req, res) => {
 
   try {
     const { orderData } = req.body;
+    
+    if (!orderData) {
+      return res.status(400).json({ error: 'Missing orderData in request body' });
+    }
     
     // Generate HTML for PIDs
     const html = generatePIDHTML(orderData);
@@ -77,11 +87,11 @@ module.exports = async (req, res) => {
     // Send PDF back
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="pid-${orderData.orderNumber}.pdf"`);
-    res.send(pdf);
+    res.status(200).send(pdf);
 
   } catch (error) {
     console.error('Error generating PID:', error);
-    res.status(500).json({ error: 'Failed to generate PID' });
+    res.status(500).json({ error: 'Failed to generate PID', details: error.message });
   }
 };
 
