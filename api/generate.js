@@ -1,5 +1,18 @@
-// api/generate.js - SIMPLE VERSION WITHOUT PUPPETEER
+// api/generate.js - WITH EXACT DESIGN SPECIFICATIONS
 const PDFDocument = require('pdfkit');
+const https = require('https');
+
+// Function to download image from URL
+function downloadImage(url) {
+  return new Promise((resolve, reject) => {
+    https.get(url, (response) => {
+      const chunks = [];
+      response.on('data', (chunk) => chunks.push(chunk));
+      response.on('end', () => resolve(Buffer.concat(chunks)));
+      response.on('error', reject);
+    });
+  });
+}
 
 module.exports = async (req, res) => {
   // Enable CORS for all origins
@@ -28,6 +41,10 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Missing orderData in request body' });
     }
 
+    // Download the background image
+    const backgroundUrl = 'https://raw.githubusercontent.com/compasscatering1045-tech/catering-pid-generator/main/background.png';
+    const backgroundImage = await downloadImage(backgroundUrl);
+
     // Parse menu items
     const menuLines = orderData.menuItems.split('\n').map(item => {
       return item.replace(/^\d+\s*x\s*/i, '').toLowerCase().trim();
@@ -50,12 +67,14 @@ module.exports = async (req, res) => {
     });
 
     // PDF dimensions
-    const pageWidth = 612; // 8.5 inches
-    const pageHeight = 792; // 11 inches
+    const pageWidth = 612; // 8.5 inches in points
+    const pageHeight = 792; // 11 inches in points
     const margin = 36; // 0.5 inch
-    const pidWidth = 261; // 3.625 inches
-    const pidHeight = 234; // 3.25 inches
+    const pidWidth = 261; // 3.625 inches in points
+    const pidHeight = 234; // 3.25 inches in points
     const gap = 18; // 0.25 inch
+    const textPaddingTop = 18; // 1/4 inch from top
+    const textPaddingLR = 18; // 1/4 inch padding left and right
 
     // Draw 6 PIDs (2 columns x 3 rows)
     for (let row = 0; row < 3; row++) {
@@ -65,50 +84,48 @@ module.exports = async (req, res) => {
         const menuIndex = (row * 2 + col) % menuLines.length;
         const menuItem = menuLines[menuIndex] || 'menu item';
 
-        // Draw border (optional)
-        doc.rect(x, y, pidWidth, pidHeight).stroke('#e0e0e0');
+        // NO BORDER - removed the rect().stroke() line
 
-        // Draw wave pattern (simplified)
+        // Add background image aligned to bottom of PID
+        // We'll scale it to fit the width and align to bottom
         doc.save();
-        doc.strokeColor('#a8d0e8').lineWidth(2).strokeOpacity(0.4);
         
-        // Draw some wavy lines
-        for (let i = 0; i < 3; i++) {
-          doc.moveTo(x + 20, y + 80 + i * 20);
-          doc.bezierCurveTo(
-            x + 80, y + 70 + i * 20,
-            x + 140, y + 90 + i * 20,
-            x + 200, y + 80 + i * 20
-          ).stroke();
+        // Set clipping region to PID bounds
+        doc.rect(x, y, pidWidth, pidHeight).clip();
+        
+        // Image dimensions - adjust these based on your actual image
+        // Assuming the image should span the width and be positioned at bottom
+        const imgWidth = pidWidth;
+        const imgHeight = pidHeight * 0.6; // Adjust this ratio based on your image
+        const imgX = x;
+        const imgY = y + pidHeight - imgHeight; // Align to bottom
+        
+        try {
+          doc.image(backgroundImage, imgX, imgY, {
+            width: imgWidth,
+            height: imgHeight,
+            align: 'center',
+            valign: 'bottom'
+          });
+        } catch (imgError) {
+          console.error('Error adding image:', imgError);
         }
         
-        // Draw spiral
-        const centerX = x + pidWidth - 60;
-        const centerY = y + 70;
-        doc.circle(centerX, centerY, 20).stroke();
-        
-        // Inner spiral
-        doc.moveTo(centerX, centerY);
-        let angle = 0;
-        let radius = 2;
-        for (let i = 0; i < 50; i++) {
-          angle += 0.3;
-          radius += 0.3;
-          const sx = centerX + Math.cos(angle) * radius;
-          const sy = centerY + Math.sin(angle) * radius;
-          doc.lineTo(sx, sy);
-        }
-        doc.stroke();
         doc.restore();
 
-        // Add menu text
+        // Add menu text - 1/4" from top with 1/4" padding on sides
         doc.fillColor('black')
            .font('Helvetica-Bold')
            .fontSize(14)
-           .text(menuItem, x, y + pidHeight / 2 - 10, {
-             width: pidWidth,
-             align: 'center'
-           });
+           .text(menuItem, 
+                 x + textPaddingLR,  // Left padding
+                 y + textPaddingTop,  // Top padding
+                 {
+                   width: pidWidth - (textPaddingLR * 2), // Account for padding on both sides
+                   align: 'center',
+                   lineBreak: true,
+                   height: pidHeight - textPaddingTop - 18 // Leave some bottom space
+                 });
       }
     }
 
