@@ -1,6 +1,5 @@
-// api/generate.js
-const chromium = require('@sparticuz/chromium');
-const puppeteer = require('puppeteer-core');
+// api/generate.js - SIMPLE VERSION WITHOUT PUPPETEER
+const PDFDocument = require('pdfkit');
 
 module.exports = async (req, res) => {
   // Enable CORS for all origins
@@ -28,39 +27,93 @@ module.exports = async (req, res) => {
     if (!orderData) {
       return res.status(400).json({ error: 'Missing orderData in request body' });
     }
-    
-    // Generate HTML for PIDs
-    const html = generatePIDHTML(orderData);
-    
-    // Launch Puppeteer with Sparticuz Chromium
-    const browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
+
+    // Parse menu items
+    const menuLines = orderData.menuItems.split('\n').map(item => {
+      return item.replace(/^\d+\s*x\s*/i, '').toLowerCase().trim();
+    }).filter(item => item.length > 0);
+
+    // Create PDF
+    const doc = new PDFDocument({
+      size: 'LETTER',
+      margin: 36 // 0.5 inch margins
     });
 
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: 'networkidle0' });
-    
-    // Generate PDF
-    const pdf = await page.pdf({
-      format: 'Letter',
-      printBackground: true,
-      margin: {
-        top: '0.5in',
-        bottom: '0.5in',
-        left: '0.5in',
-        right: '0.5in'
+    // Buffer to collect PDF data
+    const chunks = [];
+    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('end', () => {
+      const pdfBuffer = Buffer.concat(chunks);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="pid-${orderData.orderNumber}.pdf"`);
+      res.status(200).send(pdfBuffer);
+    });
+
+    // PDF dimensions
+    const pageWidth = 612; // 8.5 inches
+    const pageHeight = 792; // 11 inches
+    const margin = 36; // 0.5 inch
+    const pidWidth = 261; // 3.625 inches
+    const pidHeight = 234; // 3.25 inches
+    const gap = 18; // 0.25 inch
+
+    // Draw 6 PIDs (2 columns x 3 rows)
+    for (let row = 0; row < 3; row++) {
+      for (let col = 0; col < 2; col++) {
+        const x = margin + col * (pidWidth + gap);
+        const y = margin + row * (pidHeight + gap);
+        const menuIndex = (row * 2 + col) % menuLines.length;
+        const menuItem = menuLines[menuIndex] || 'menu item';
+
+        // Draw border (optional)
+        doc.rect(x, y, pidWidth, pidHeight).stroke('#e0e0e0');
+
+        // Draw wave pattern (simplified)
+        doc.save();
+        doc.strokeColor('#a8d0e8').lineWidth(2).strokeOpacity(0.4);
+        
+        // Draw some wavy lines
+        for (let i = 0; i < 3; i++) {
+          doc.moveTo(x + 20, y + 80 + i * 20);
+          doc.bezierCurveTo(
+            x + 80, y + 70 + i * 20,
+            x + 140, y + 90 + i * 20,
+            x + 200, y + 80 + i * 20
+          ).stroke();
+        }
+        
+        // Draw spiral
+        const centerX = x + pidWidth - 60;
+        const centerY = y + 70;
+        doc.circle(centerX, centerY, 20).stroke();
+        
+        // Inner spiral
+        doc.moveTo(centerX, centerY);
+        let angle = 0;
+        let radius = 2;
+        for (let i = 0; i < 50; i++) {
+          angle += 0.3;
+          radius += 0.3;
+          const sx = centerX + Math.cos(angle) * radius;
+          const sy = centerY + Math.sin(angle) * radius;
+          doc.lineTo(sx, sy);
+        }
+        doc.stroke();
+        doc.restore();
+
+        // Add menu text
+        doc.fillColor('black')
+           .font('Helvetica-Bold')
+           .fontSize(14)
+           .text(menuItem, x, y + pidHeight / 2 - 10, {
+             width: pidWidth,
+             align: 'center'
+           });
       }
-    });
+    }
 
-    await browser.close();
-
-    // Send PDF back
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="pid-${orderData.orderNumber}.pdf"`);
-    res.status(200).send(pdf);
+    // Finalize PDF
+    doc.end();
 
   } catch (error) {
     console.error('Error generating PID:', error);
@@ -68,177 +121,12 @@ module.exports = async (req, res) => {
   }
 };
 
-function generatePIDHTML(orderData) {
-  // Parse menu items - just get the item names
-  const menuLines = orderData.menuItems.split('\n').map(item => {
-    return item.replace(/^\d+\s*x\s*/i, '').toLowerCase().trim();
-  }).filter(item => item.length > 0);
-
-  // Create PIDs with just the menu item name
-  const pids = [];
-  
-  // URL to your background image on GitHub (raw content)
-  const backgroundUrl = 'https://raw.githubusercontent.com/compasscatering1045-tech/catering-pid-generator/main/background.png';
-  
-  // Generate 6 PIDs (can be different menu items or repeated)
-  for (let i = 0; i < 6; i++) {
-    const menuItem = menuLines[i % menuLines.length] || 'menu item';
-    pids.push(`
-      <div class="pid">
-        <div class="menu-text">${menuItem}</div>
-      </div>
-    `);
-  }
-
-  return `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <style>
-        @page {
-          size: letter;
-          margin: 0.5in;
-        }
-        
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-        
-        body {
-          font-family: Arial, Helvetica, sans-serif;
-          font-weight: bold;
-          width: 8.5in;
-          height: 11in;
-          padding: 0.5in;
-        }
-        
-        .container {
-          width: 7.5in;
-          height: 10in;
-          display: grid;
-          grid-template-columns: repeat(2, 3.625in);
-          grid-template-rows: repeat(3, 3.25in);
-          gap: 0.25in;
-        }
-        
-        .pid {
-          width: 3.625in;
-          height: 3.25in;
-          position: relative;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          overflow: hidden;
-        }
-        
-        .wave-bg {
-          position: absolute;
-          width: 100%;
-          height: 100%;
-          top: 0;
-          left: 0;
-          z-index: 1;
-        }
-        
-        .menu-text {
-          position: relative;
-          z-index: 2;
-          font-size: 14pt;
-          font-weight: bold;
-          color: #000;
-          text-align: center;
-          padding: 0 20px;
-          line-height: 1.3;
-          max-width: 90%;
-          word-wrap: break-word;
-        }
-        
-        @media print {
-          body {
-            margin: 0;
-            padding: 0.5in;
-          }
-          
-          .container {
-            page-break-inside: avoid;
-          }
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        ${pids.join('')}
-      </div>
-    </body>
-    </html>
-  `;
-}
-
-// README.md
-# Catering PID Generator
-
-## Setup Instructions
-
-1. **Install Vercel CLI**
-   ```bash
-   npm install -g vercel
-   ```
-
-2. **Clone this project**
-   ```bash
-   git clone [your-repo]
-   cd catering-pid-generator
-   ```
-
-3. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-4. **Add your compass rose image**
-   - Convert your PNG to base64: https://www.base64-image.de/
-   - Replace `YOUR_BASE64_COMPASS_ROSE_HERE` in api/generate.js
-
-5. **Deploy to Vercel**
-   ```bash
-   vercel
-   ```
-   Follow the prompts (accept all defaults)
-
-6. **Get your URL**
-   Your API will be available at:
-   ```
-   https://your-project-name.vercel.app/api/generate
-   ```
-
-7. **Update n8n workflow**
-   Replace the PID webhook URL with your Vercel URL
-
-## Testing
-
-Send a POST request with:
-```json
+// package.json for simple version
 {
-  "orderData": {
-    "orderNumber": "17752",
-    "customerName": "Susan",
-    "phone": "954-851-6378",
-    "date": "2024-07-10",
-    "time": "12:45 PM",
-    "location": "North 3-3061",
-    "menuItems": "8 x House Chips\n8 x Dessert Tray\n8 x Fresh Fruit",
-    "specialInstructions": "None"
+  "name": "catering-pid-generator",
+  "version": "1.0.0",
+  "description": "Generate PID labels for catering orders",
+  "dependencies": {
+    "pdfkit": "^0.13.0"
   }
 }
-```
-
-## Local Development
-
-```bash
-vercel dev
-```
-This runs the function locally at http://localhost:3000/api/generate
-
