@@ -120,13 +120,3 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: 'Failed to generate PID', details: error.message });
   }
 };
-
-// package.json for simple version
-{
-  "name": "catering-pid-generator",
-  "version": "1.0.0",
-  "description": "Generate PID labels for catering orders",
-  "dependencies": {
-    "pdfkit": "^0.13.0"
-  }
-}
