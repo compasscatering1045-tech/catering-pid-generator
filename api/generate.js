@@ -1,31 +1,3 @@
-// package.json
-{
-  "name": "catering-pid-generator",
-  "version": "1.0.0",
-  "description": "Generate PID labels for catering orders",
-  "main": "api/generate.js",
-  "scripts": {
-    "dev": "vercel dev",
-    "deploy": "vercel --prod"
-  },
-  "dependencies": {
-    "puppeteer-core": "^21.0.0",
-    "chrome-aws-lambda": "^10.1.0"
-  },
-  "devDependencies": {
-    "vercel": "^32.0.0"
-  }
-}
-
-// vercel.json
-{
-  "functions": {
-    "api/generate.js": {
-      "maxDuration": 10
-    }
-  }
-}
-
 // api/generate.js
 const chromium = require('@sparticuz/chromium');
 const puppeteer = require('puppeteer-core');
@@ -105,28 +77,14 @@ function generatePIDHTML(orderData) {
   // Create PIDs with just the menu item name
   const pids = [];
   
+  // URL to your background image on GitHub (raw content)
+  const backgroundUrl = 'https://raw.githubusercontent.com/compasscatering1045-tech/catering-pid-generator/main/background.png';
+  
   // Generate 6 PIDs (can be different menu items or repeated)
   for (let i = 0; i < 6; i++) {
     const menuItem = menuLines[i % menuLines.length] || 'menu item';
     pids.push(`
       <div class="pid">
-        <svg class="wave-bg" viewBox="0 0 300 300" xmlns="http://www.w3.org/2000/svg">
-          <!-- Wave pattern similar to your design -->
-          <g stroke="#a8d0e8" stroke-width="3" fill="none" opacity="0.6">
-            <!-- Horizontal flowing waves -->
-            <path d="M 20 100 Q 60 80, 100 100 T 180 100 T 260 100" />
-            <path d="M 20 120 Q 60 100, 100 120 T 180 120 T 260 120" />
-            <path d="M 20 140 Q 60 120, 100 140 T 180 140 T 260 140" />
-            
-            <!-- Spiral element -->
-            <circle cx="210" cy="90" r="25" stroke-width="2.5" />
-            <path d="M 210 90 Q 220 80, 230 90 T 240 110 T 220 120 T 200 110 T 210 90" stroke-width="2" />
-            <path d="M 210 90 Q 215 85, 220 90 T 225 100 T 215 105 T 205 100 T 210 90" stroke-width="2" />
-            
-            <!-- Additional wave -->
-            <path d="M 30 160 Q 70 150, 110 160 T 190 160 T 270 160" />
-          </g>
-        </svg>
         <div class="menu-text">${menuItem}</div>
       </div>
     `);
@@ -283,3 +241,4 @@ Send a POST request with:
 vercel dev
 ```
 This runs the function locally at http://localhost:3000/api/generate
+
