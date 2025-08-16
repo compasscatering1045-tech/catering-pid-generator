@@ -70,8 +70,8 @@ module.exports = async (req, res) => {
     const pageWidth = 612; // 8.5 inches in points
     const pageHeight = 792; // 11 inches in points
     const margin = 36; // 0.5 inch
-    const pidWidth = 261; // 3.625 inches in points
-    const pidHeight = 234; // 3.25 inches in points
+    const pidWidth = 216; // 3 inches in points (3 * 72)
+    const pidHeight = 216; // 3 inches in points (3 * 72)
     const gap = 18; // 0.25 inch
     const textPaddingTop = 18; // 1/4 inch from top
     const textPaddingLR = 18; // 1/4 inch padding left and right
@@ -86,26 +86,18 @@ module.exports = async (req, res) => {
 
         // NO BORDER - removed the rect().stroke() line
 
-        // Add background image aligned to bottom of PID
-        // We'll scale it to fit the width and align to bottom
+        // Add background image - exact size, no stretching
         doc.save();
         
         // Set clipping region to PID bounds
         doc.rect(x, y, pidWidth, pidHeight).clip();
         
-        // Image dimensions - adjust these based on your actual image
-        // Assuming the image should span the width and be positioned at bottom
-        const imgWidth = pidWidth;
-        const imgHeight = pidHeight * 0.6; // Adjust this ratio based on your image
-        const imgX = x;
-        const imgY = y + pidHeight - imgHeight; // Align to bottom
-        
+        // Image is 900x900px at 300dpi = 3"x3" = 216x216 points
+        // Place it exactly at the PID position
         try {
-          doc.image(backgroundImage, imgX, imgY, {
-            width: imgWidth,
-            height: imgHeight,
-            align: 'center',
-            valign: 'bottom'
+          doc.image(backgroundImage, x, y, {
+            width: pidWidth,  // 216 points = 3 inches
+            height: pidHeight // 216 points = 3 inches
           });
         } catch (imgError) {
           console.error('Error adding image:', imgError);
