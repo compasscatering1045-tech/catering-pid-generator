@@ -69,18 +69,19 @@ module.exports = async (req, res) => {
     // PDF dimensions
     const pageWidth = 612; // 8.5 inches in points
     const pageHeight = 792; // 11 inches in points
-    const margin = 36; // 0.5 inch
+    const leftRightMargin = 72; // 1 inch margins on left and right
+    const topBottomMargin = 36; // 0.5 inch margins on top and bottom
     const pidWidth = 216; // 3 inches in points (3 * 72)
     const pidHeight = 216; // 3 inches in points (3 * 72)
-    const gap = 18; // 0.25 inch
+    const gap = 36; // 0.5 inch gap between PIDs
     const textPaddingTop = 18; // 1/4 inch from top
     const textPaddingLR = 18; // 1/4 inch padding left and right
 
     // Draw 6 PIDs (2 columns x 3 rows)
     for (let row = 0; row < 3; row++) {
       for (let col = 0; col < 2; col++) {
-        const x = margin + col * (pidWidth + gap);
-        const y = margin + row * (pidHeight + gap);
+        const x = leftRightMargin + col * (pidWidth + gap);
+        const y = topBottomMargin + row * (pidHeight + gap);
         const menuIndex = (row * 2 + col) % menuLines.length;
         const menuItem = menuLines[menuIndex] || 'menu item';
 
@@ -108,7 +109,7 @@ module.exports = async (req, res) => {
         // Add menu text - 1/4" from top with 1/4" padding on sides
         doc.fillColor('black')
            .font('Helvetica-Bold')
-           .fontSize(14)
+           .fontSize(12)  // Changed from 14 to 12
            .text(menuItem, 
                  x + textPaddingLR,  // Left padding
                  y + textPaddingTop,  // Top padding
