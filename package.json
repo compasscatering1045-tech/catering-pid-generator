@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Generate PID labels for catering orders",
   "dependencies": {
-    "puppeteer-core": "10.1.0",
-    "chrome-aws-lambda": "10.1.0"
+    "@sparticuz/chromium": "^119.0.0",
+    "puppeteer-core": "^21.5.0"
   }
 }
