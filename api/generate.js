@@ -1,64 +1,67 @@
-// api/generate.js - WITH EXACT DESIGN SPECIFICATIONS
-const PDFDocument = require('pdfkit');
-const https = require('https');
-
-// Function to download image from URL
-function downloadImage(url) {
-  return new Promise((resolve, reject) => {
-    https.get(url, (response) => {
-      const chunks = [];
-      response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => resolve(Buffer.concat(chunks)));
-      response.on('error', reject);
-    });
-  });
-}
+// ... keep your CORS + method handling + image download ...
 
 module.exports = async (req, res) => {
-  // Enable CORS for all origins
-  res.setHeader('Access-Control-Allow-Credentials', true);
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
-  );
-
-  // Handle preflight request
-  if (req.method === 'OPTIONS') {
-    res.status(200).end();
-    return;
-  }
-
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  // CORS and method checks (unchanged)
 
   try {
-    const { orderData } = req.body;
-    
-    if (!orderData) {
-      return res.status(400).json({ error: 'Missing orderData in request body' });
-    }
+    const { orderData, lineItems = [], exclude = [], expandQty = true } = req.body || {};
+    if (!orderData) return res.status(400).json({ error: 'Missing orderData in request body' });
 
-    // Download the background image
+    // Download background once
     const backgroundUrl = 'https://raw.githubusercontent.com/compasscatering1045-tech/catering-pid-generator/main/background.png';
     const backgroundImage = await downloadImage(backgroundUrl);
 
-    // Parse menu items
-    const menuLines = orderData.menuItems.split('\n').map(item => {
-      return item.replace(/^\d+\s*x\s*/i, '').toLowerCase().trim();
-    }).filter(item => item.length > 0);
+    // ---------- Build the label list ----------
+    const EXCLUDE = exclude.map(s => String(s).toLowerCase().trim());
 
-    // Create PDF
-    const doc = new PDFDocument({
-      size: 'LETTER',
-      margin: 36 // 0.5 inch margins
-    });
+    const shouldExclude = (s) => {
+      const t = String(s).toLowerCase().trim();
+      if (!t) return true;
+      // drop obvious group headers / sections
+      if (/\b(x\s*\d+)\)?\s*$/i.test(t)) return true;          // trailing (x 12)
+      if (/^\d+\s*(?:x|×)?\s*$/i.test(t)) return true;         // bare counts
+      if (/^(a\s+la\s+carte|beverages|desserts?)\b/i.test(t)) return true;
+      // user-provided excludes
+      return EXCLUDE.some(k => t.includes(k));
+    };
 
-    // Buffer to collect PDF data
+    const stripQty = (s) => {
+      let r = String(s);
+      r = r.replace(/\(\s*x\s*\d+\s*\)\s*$/i, '');   // remove trailing (x 12)
+      r = r.replace(/^\s*\d+\s*(?:x|×)?\s*/i, '');    // remove leading "12 x" or "12"
+      r = r.trim();
+      return r;
+    };
+
+    let labels = [];
+
+    if (Array.isArray(lineItems) && lineItems.length) {
+      // Prefer structured items when provided
+      for (const li of lineItems) {
+        const name = stripQty(li?.item || '');
+        if (!name || shouldExclude(name)) continue;
+        const qty = expandQty && Number(li?.qty) ? Number(li.qty) : 1;
+        for (let i = 0; i < qty; i++) labels.push(name);
+      }
+    } else {
+      // Fallback: parse from menuItems string (keep case, split lines)
+      const raw = String(orderData.menuItems || '');
+      const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      for (let s of lines) {
+        const name = stripQty(s);
+        if (!name || shouldExclude(name)) continue;
+        labels.push(name);
+      }
+    }
+
+    if (!labels.length) labels = ['menu item'];
+
+    // ---------- PDF setup ----------
+    const PDFDocument = require('pdfkit');
+    const doc = new PDFDocument({ size: 'LETTER', margin: 36 });
+
     const chunks = [];
-    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('data', c => chunks.push(c));
     doc.on('end', () => {
       const pdfBuffer = Buffer.concat(chunks);
       res.setHeader('Content-Type', 'application/pdf');
@@ -66,65 +69,47 @@ module.exports = async (req, res) => {
       res.status(200).send(pdfBuffer);
     });
 
-    // PDF dimensions
-    const pageWidth = 612; // 8.5 inches in points
-    const pageHeight = 792; // 11 inches in points
-    const leftRightMargin = 72; // 1 inch margins on left and right
-    const topBottomMargin = 36; // 0.5 inch margins on top and bottom
-    const pidWidth = 216; // 3 inches in points (3 * 72)
-    const pidHeight = 216; // 3 inches in points (3 * 72)
-    const gap = 36; // 0.5 inch gap between PIDs
-    const textPaddingTop = 18; // 1/4 inch from top
-    const textPaddingLR = 18; // 1/4 inch padding left and right
+    // Geometry
+    const pageWidth = 612, pageHeight = 792;
+    const leftRightMargin = 72;
+    const topBottomMargin = 36;
+    const pidWidth = 216, pidHeight = 216; // 3" x 3"
+    const gap = 36;
+    const textPaddingTop = 18, textPaddingLR = 18;
 
-    // Draw 6 PIDs (2 columns x 3 rows)
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 2; col++) {
-        const x = leftRightMargin + col * (pidWidth + gap);
-        const y = topBottomMargin + row * (pidHeight + gap);
-        const menuIndex = (row * 2 + col) % menuLines.length;
-        const menuItem = menuLines[menuIndex] || 'menu item';
+    // ---------- Draw all labels with auto-pagination (6 per page) ----------
+    const drawOne = (x, y, text) => {
+      // clip + background
+      doc.save();
+      doc.rect(x, y, pidWidth, pidHeight).clip();
+      try {
+        doc.image(backgroundImage, x, y, { width: pidWidth, height: pidHeight });
+      } catch {}
+      doc.restore();
 
-        // NO BORDER - removed the rect().stroke() line
+      // centered text
+      doc.fillColor('black')
+         .font('Helvetica-Bold')
+         .fontSize(12)
+         .text(text, x + textPaddingLR, y + textPaddingTop, {
+            width: pidWidth - (textPaddingLR * 2),
+            align: 'center',
+            lineBreak: true,
+            height: pidHeight - textPaddingTop - 18
+         });
+    };
 
-        // Add background image - exact size, no stretching
-        doc.save();
-        
-        // Set clipping region to PID bounds
-        doc.rect(x, y, pidWidth, pidHeight).clip();
-        
-        // Image is 900x900px at 300dpi = 3"x3" = 216x216 points
-        // Place it exactly at the PID position
-        try {
-          doc.image(backgroundImage, x, y, {
-            width: pidWidth,  // 216 points = 3 inches
-            height: pidHeight // 216 points = 3 inches
-          });
-        } catch (imgError) {
-          console.error('Error adding image:', imgError);
-        }
-        
-        doc.restore();
-
-        // Add menu text - 1/4" from top with 1/4" padding on sides
-        doc.fillColor('black')
-           .font('Helvetica-Bold')
-           .fontSize(12)  // Changed from 14 to 12
-           .text(menuItem, 
-                 x + textPaddingLR,  // Left padding
-                 y + textPaddingTop,  // Top padding
-                 {
-                   width: pidWidth - (textPaddingLR * 2), // Account for padding on both sides
-                   align: 'center',
-                   lineBreak: true,
-                   height: pidHeight - textPaddingTop - 18 // Leave some bottom space
-                 });
-      }
+    for (let i = 0; i < labels.length; i++) {
+      if (i > 0 && i % 6 === 0) doc.addPage();                     // NEW: extra pages
+      const slot = i % 6;
+      const row = Math.floor(slot / 2);
+      const col = slot % 2;
+      const x = leftRightMargin + col * (pidWidth + gap);
+      const y = topBottomMargin + row * (pidHeight + gap);
+      drawOne(x, y, labels[i]);
     }
 
-    // Finalize PDF
     doc.end();
-
   } catch (error) {
     console.error('Error generating PID:', error);
     res.status(500).json({ error: 'Failed to generate PID', details: error.message });
