@@ -40,8 +40,8 @@ module.exports = async (req, res) => {
       for (const li of lineItems) {
         const name = stripQty(li?.item || '');
         if (!name || shouldExclude(name)) continue;
-        const qty = expandQty && Number(li?.qty) ? Number(li.qty) : 1;
-        for (let i = 0; i < qty; i++) labels.push(name);
+        labels.push(name);
+
       }
     } else {
       // Fallback: parse from menuItems string (keep case, split lines)
@@ -115,3 +115,4 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: 'Failed to generate PID', details: error.message });
   }
 };
+
