@@ -10,6 +10,29 @@ async function downloadImage(url) {
   return buf;
 }
 
+// Coercion helpers
+const toBool = (v, d=false) =>
+  typeof v === 'boolean' ? v : (typeof v === 'string' ? v.toLowerCase() === 'true' : d);
+
+const toArray = (v) => {
+  if (Array.isArray(v)) return v;
+  if (typeof v === 'string') {
+    try { const p = JSON.parse(v); if (Array.isArray(p)) return p; } catch {}
+    return v.split(',').map(s => s.trim()).filter(Boolean);
+  }
+  return [];
+};
+
+// Inside your handler:
+let { orderData, lineItems, exclude, expandQty, lowercase } = req.body || {};
+lineItems  = Array.isArray(lineItems) ? lineItems : toArray(lineItems);
+exclude    = toArray(exclude);
+expandQty  = toBool(expandQty, true);
+lowercase  = toBool(lowercase, true);
+
+// Later:
+const EXCLUDE = exclude.map(s => String(s).toLowerCase().trim());
+
 module.exports = async (req, res) => {
   // CORS and method checks (unchanged)
 
@@ -125,5 +148,6 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: 'Failed to generate PID', details: error.message });
   }
 };
+
 
 
