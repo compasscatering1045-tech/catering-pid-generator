@@ -1,5 +1,15 @@
 // ... keep your CORS + method handling + image download ...
 
+// Use the built-in fetch in the Vercel Node runtime
+async function downloadImage(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`downloadImage fetch failed: ${res.status} ${res.statusText}`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  return buf;
+}
+
 module.exports = async (req, res) => {
   // CORS and method checks (unchanged)
 
@@ -115,4 +125,5 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: 'Failed to generate PID', details: error.message });
   }
 };
+
 
