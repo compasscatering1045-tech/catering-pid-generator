@@ -1,3 +1,4 @@
+
 // api/generate.js
 const PDFDocument = require('pdfkit');
 
@@ -139,8 +140,8 @@ module.exports = async (req, res) => {
       doc.restore();
 
       doc.fillColor('black')
-         .font('Calibri-Bold')
-         .fontSize(10)
+         .font('Helvetica-Bold')
+         .fontSize(12)
          .text(text, x + textPaddingLR, y + textPaddingTop, {
             width: pidWidth - (textPaddingLR * 2),
             align: 'center',
@@ -166,4 +167,3 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: { code: '500', message: 'A server error has occurred' } });
   }
 };
-
