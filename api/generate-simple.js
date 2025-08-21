@@ -41,17 +41,24 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'Missing orderData in request body' });
     }
 
-    // Download the background image
-    const backgroundUrl = 'https://raw.githubusercontent.com/compasscatering1045-tech/catering-pid-generator/main/background.png';
-    const backgroundImage = await downloadImage(backgroundUrl);
-
     // Parse menu items
     const menuLines = orderData.menuItems.split('\n').map(item => {
       return item.trim().toLowerCase();
     }).filter(item => item.length > 0);
 
-    // Get price per lb (use the one provided or extract from special instructions)
-    const pricePerLb = orderData.pricePerLb || orderData.specialInstructions || '$0.00';
+    // Get price per oz
+    const pricePerOz = orderData.pricePerOz || '0.00';
+    const formattedPrice = `${pricePerOz}/oz`;
+
+    // Check if background should be enabled (default is false)
+    const enableBackground = orderData.enableBackground || false;
+
+    // Download background image only if enabled
+    let backgroundImage = null;
+    if (enableBackground) {
+      const backgroundUrl = 'https://raw.githubusercontent.com/compasscatering1045-tech/catering-pid-generator/main/background.png';
+      backgroundImage = await downloadImage(backgroundUrl);
+    }
 
     // Create PDF
     const doc = new PDFDocument({
@@ -89,49 +96,52 @@ module.exports = async (req, res) => {
         // Skip if no menu item
         if (!menuItem) continue;
 
-        // Add background image - exact size, no stretching
-        doc.save();
-        
-        // Set clipping region to PID bounds
-        doc.rect(x, y, pidWidth, pidHeight).clip();
-        
-        // Place background image
-        try {
-          doc.image(backgroundImage, x, y, {
-            width: pidWidth,
-            height: pidHeight
-          });
-        } catch (imgError) {
-          console.error('Error adding image:', imgError);
+        // Add background image only if enabled
+        if (enableBackground && backgroundImage) {
+          doc.save();
+          
+          // Set clipping region to PID bounds
+          doc.rect(x, y, pidWidth, pidHeight).clip();
+          
+          // Place background image
+          try {
+            doc.image(backgroundImage, x, y, {
+              width: pidWidth,
+              height: pidHeight
+            });
+          } catch (imgError) {
+            console.error('Error adding image:', imgError);
+          }
+          
+          doc.restore();
         }
-        
-        doc.restore();
 
-        // Calculate vertical centering
-        // We want the text to be centered in the PID
-        const totalTextHeight = 60; // Approximate height for item name + price
-        const startY = y + (pidHeight - totalTextHeight) / 2;
+        // Text positioning
+        // 1 inch from top of PID for menu item
+        const itemY = y + 72; // 72 points = 1 inch
+        // 1/2 inch below that for price
+        const priceY = itemY + 36; // 36 points = 0.5 inch
 
-        // Add menu item name - centered, larger font
+        // Add menu item name - 14pt bold
         doc.fillColor('black')
            .font('Helvetica-Bold')
-           .fontSize(16)
+           .fontSize(14)
            .text(menuItem, 
                  x,
-                 startY,
+                 itemY,
                  {
                    width: pidWidth,
                    align: 'center',
                    lineBreak: true
                  });
 
-        // Add price below - centered, smaller font
+        // Add price below - centered
         doc.fillColor('#333')
            .font('Helvetica')
            .fontSize(12)
-           .text(pricePerLb,
+           .text(formattedPrice,
                  x,
-                 startY + 30, // Space below the item name
+                 priceY,
                  {
                    width: pidWidth,
                    align: 'center'
