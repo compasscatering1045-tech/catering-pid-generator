@@ -140,8 +140,8 @@ module.exports = async (req, res) => {
       doc.restore();
 
       doc.fillColor('black')
-         .font('Helvetica')
-         .fontSize(10)
+         .font('Helvetica-Bold')
+         .fontSize(11)
          .text(text, x + textPaddingLR, y + textPaddingTop, {
             width: pidWidth - (textPaddingLR * 2),
             align: 'center',
@@ -167,4 +167,5 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: { code: '500', message: 'A server error has occurred' } });
   }
 };
+
 
