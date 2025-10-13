@@ -140,9 +140,9 @@ module.exports = async (req, res) => {
       try { doc.image(backgroundImage, x, y, { width: pidWidth, height: pidHeight }); } catch {}
       doc.restore();
 
-      // measure text height at 14pt within available width
+      // measure text height at 13pt within available width
       const textWidth = pidWidth - (textPaddingLR * 2);
-      doc.font('Helvetica-Bold').fontSize(14);
+      doc.font('Helvetica-Bold').fontSize(13);
       const measureOpts = { width: textWidth, align: 'center' };
       let textHeight = doc.heightOfString(String(text || ''), measureOpts);
 
@@ -181,3 +181,4 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: { code: '500', message: 'A server error has occurred' } });
   }
 };
+
