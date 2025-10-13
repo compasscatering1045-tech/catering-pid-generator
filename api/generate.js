@@ -1,4 +1,3 @@
-
 // api/generate.js
 const PDFDocument = require('pdfkit');
 
@@ -131,23 +130,38 @@ module.exports = async (req, res) => {
     const leftRightMargin = 72, topBottomMargin = 36;
     const pidWidth = 216, pidHeight = 216; // 3" x 3"
     const gap = 36;
-    const textPaddingTop = 18, textPaddingLR = 18;
+    const textPaddingLR = 18; // left/right padding
 
+    // ---------- UPDATED drawLabel ----------
     const drawLabel = (x, y, text) => {
+      // draw background (clipped to the 3"x3" box)
       doc.save();
       doc.rect(x, y, pidWidth, pidHeight).clip();
       try { doc.image(backgroundImage, x, y, { width: pidWidth, height: pidHeight }); } catch {}
       doc.restore();
 
+      // measure text height at 14pt within available width
+      const textWidth = pidWidth - (textPaddingLR * 2);
+      doc.font('Helvetica-Bold').fontSize(14);
+      const measureOpts = { width: textWidth, align: 'center' };
+      let textHeight = doc.heightOfString(String(text || ''), measureOpts);
+
+      // if it somehow measures taller than the box, cap it (we'll clip anyway)
+      if (textHeight > pidHeight) textHeight = pidHeight;
+
+      // center vertically
+      const startY = y + (pidHeight - textHeight) / 2;
+
+      // draw text, clipped to the label bounds to avoid overflow
+      doc.save();
+      doc.rect(x, y, pidWidth, pidHeight).clip();
       doc.fillColor('black')
-         .font('Helvetica-Bold')
-         .fontSize(11)
-         .text(text, x + textPaddingLR, y + textPaddingTop, {
-            width: pidWidth - (textPaddingLR * 2),
+         .text(text, x + textPaddingLR, startY, {
+            width: textWidth,
             align: 'center',
             lineBreak: true,
-            height: pidHeight - textPaddingTop - 18
          });
+      doc.restore();
     };
 
     // ---------- auto-pagination ----------
@@ -167,5 +181,3 @@ module.exports = async (req, res) => {
     res.status(500).json({ error: { code: '500', message: 'A server error has occurred' } });
   }
 };
-
-
