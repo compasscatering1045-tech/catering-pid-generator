@@ -132,7 +132,7 @@ module.exports = async (req, res) => {
     const gap = 36;
     const textPaddingLR = 18; // left/right padding
 
-    // ---------- UPDATED drawLabel ----------
+    // ---------- UPDATED drawLabel (40% from top) ----------
     const drawLabel = (x, y, text) => {
       // draw background (clipped to the 3"x3" box)
       doc.save();
@@ -140,19 +140,18 @@ module.exports = async (req, res) => {
       try { doc.image(backgroundImage, x, y, { width: pidWidth, height: pidHeight }); } catch {}
       doc.restore();
 
-      // measure text height at 13pt within available width
+      // measure text height at 14pt within available width
       const textWidth = pidWidth - (textPaddingLR * 2);
       doc.font('Helvetica-Bold').fontSize(13);
       const measureOpts = { width: textWidth, align: 'center' };
       let textHeight = doc.heightOfString(String(text || ''), measureOpts);
 
-      // if it somehow measures taller than the box, cap it (we'll clip anyway)
       if (textHeight > pidHeight) textHeight = pidHeight;
 
-      // center vertically
-      const startY = y + (pidHeight - textHeight) / 2;
+      // position text so baseline is 40% down from top (slightly higher)
+      const startY = y + (pidHeight * 0.4) - (textHeight / 2);
 
-      // draw text, clipped to the label bounds to avoid overflow
+      // draw text, clipped to the label bounds
       doc.save();
       doc.rect(x, y, pidWidth, pidHeight).clip();
       doc.fillColor('black')
@@ -176,9 +175,4 @@ module.exports = async (req, res) => {
     }
 
     doc.end();
-  } catch (err) {
-    console.error('Error generating PID:', err);
-    res.status(500).json({ error: { code: '500', message: 'A server error has occurred' } });
   }
-};
-
