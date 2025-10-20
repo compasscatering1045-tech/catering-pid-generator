@@ -2,7 +2,8 @@
   "name": "catering-pid-generator",
   "version": "1.0.0",
   "description": "Generate PID labels for catering orders",
+  "engines": { "node": ">=18" },
   "dependencies": {
-    "pdfkit": "^0.13.0"
+    "pdfkit": "^0.15.0"
   }
 }
