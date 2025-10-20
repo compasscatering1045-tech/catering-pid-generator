@@ -10,7 +10,7 @@ async function downloadImage(url) {
     if (!res.ok) throw new Error(`fetch ${res.status} ${res.statusText}`);
     return Buffer.from(await res.arrayBuffer());
   } catch (e) {
-    console.error('downloadImage error:', e.message);
+    console.error('downloadImage error:', e?.message || e);
     // draw without background if fetch fails
     return Buffer.alloc(0);
   }
@@ -25,7 +25,10 @@ const toArray = (v) => {
   if (v == null) return [];
   if (typeof v === 'string') {
     // try JSON first, then comma-split fallback
-    try { const j = JSON.parse(v); if (Array.isArray(j)) return j; } catch {}
+    try {
+      const j = JSON.parse(v);
+      if (Array.isArray(j)) return j;
+    } catch (e) {}
     return v.split(',').map(s => s.trim()).filter(Boolean);
   }
   return [];
@@ -49,9 +52,11 @@ module.exports = async (req, res) => {
       const chunks = [];
       for await (const c of req) chunks.push(c);
       const raw = Buffer.concat(chunks).toString('utf8');
-      try { body = JSON.parse(raw); } catch { body = {}; }
+      try { body = JSON.parse(raw); } catch (e) { body = {}; }
     }
-    if (typeof body === 'string') { try { body = JSON.parse(body); } catch {} }
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch (e) {}
+    }
 
     let { orderData, lineItems, exclude, expandQty, lowercase } = body || {};
     if (!orderData) return res.status(400).json({ error: 'Missing orderData in request body' });
@@ -132,34 +137,39 @@ module.exports = async (req, res) => {
     const gap = 36;
     const textPaddingLR = 18; // left/right padding
 
-    // ---------- UPDATED drawLabel (40% from top) ----------
+    // ---------- drawLabel (40% from top, centered horizontally) ----------
     const drawLabel = (x, y, text) => {
-      // draw background (clipped to the 3"x3" box)
+      // background (clip to box)
       doc.save();
       doc.rect(x, y, pidWidth, pidHeight).clip();
-      try { doc.image(backgroundImage, x, y, { width: pidWidth, height: pidHeight }); } catch {}
+      try {
+        doc.image(backgroundImage, x, y, { width: pidWidth, height: pidHeight });
+      } catch (e) {}
       doc.restore();
 
-      // measure text height at 14pt within available width
+      // text metrics
       const textWidth = pidWidth - (textPaddingLR * 2);
-      doc.font('Helvetica-Bold').fontSize(13);
+      doc.font('Helvetica-Bold').fontSize(14);
       const measureOpts = { width: textWidth, align: 'center' };
-      let textHeight = doc.heightOfString(String(text || ''), measureOpts);
-
+      let textHeight;
+      try {
+        textHeight = doc.heightOfString(String(text || ''), measureOpts);
+      } catch (e) {
+        textHeight = 14; // safe fallback
+      }
       if (textHeight > pidHeight) textHeight = pidHeight;
 
-      // position text so baseline is 40% down from top (slightly higher)
+      // place text so its block center sits at 40% of the box height
       const startY = y + (pidHeight * 0.4) - (textHeight / 2);
 
-      // draw text, clipped to the label bounds
+      // draw text (clip to label)
       doc.save();
       doc.rect(x, y, pidWidth, pidHeight).clip();
-      doc.fillColor('black')
-         .text(text, x + textPaddingLR, startY, {
-            width: textWidth,
-            align: 'center',
-            lineBreak: true,
-         });
+      doc.fillColor('black').text(String(text || ''), x + textPaddingLR, startY, {
+        width: textWidth,
+        align: 'center',
+        lineBreak: true,
+      });
       doc.restore();
     };
 
@@ -175,4 +185,11 @@ module.exports = async (req, res) => {
     }
 
     doc.end();
+  } catch (err) {
+    console.error('Error generating PID:', err);
+    res.status(500).json({ error: { code: '500', message: 'A server error has occurred' } });
   }
+};
+
+// Force Node runtime (PDFKit needs Node, not Edge)
+module.exports.config = { runtime: 'nodejs18.x' };
