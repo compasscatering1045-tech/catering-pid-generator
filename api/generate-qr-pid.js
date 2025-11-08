@@ -1,0 +1,194 @@
+// api/generate-qr-pid.js
+const PDFDocument = require('pdfkit');
+
+function parseBody(req) {
+  return new Promise((resolve) => {
+    if (req.body && typeof req.body === 'object') {
+      return resolve(req.body);
+    }
+    if (typeof req.body === 'string') {
+      try { return resolve(JSON.parse(req.body)); } catch (e) {}
+    }
+
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      const raw = Buffer.concat(chunks).toString('utf8');
+      try { resolve(JSON.parse(raw)); }
+      catch (e) { resolve({}); }
+    });
+  });
+}
+
+// Decode a data URL like "data:image/png;base64,AAAA..."
+function decodeDataUrl(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string') return null;
+  const match = dataUrl.match(/^data:image\/(png|jpe?g);base64,(.+)$/i);
+  if (!match) return null;
+  return Buffer.from(match[2], 'base64');
+}
+
+module.exports = async (req, res) => {
+  // CORS (similar to your generate-simple)
+  res.setHeader('Access-Control-Allow-Credentials', true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader(
+    'Access-Control-Allow-Methods',
+    'GET,OPTIONS,PATCH,DELETE,POST,PUT'
+  );
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, ' +
+      'Content-MD5, Content-Type, Date, X-Api-Version'
+  );
+
+  if (req.method === 'OPTIONS') {
+    res.status(200).end();
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  try {
+    const body = await parseBody(req);
+
+    let { itemName, qrImageDataUrl, labelsPerSheet, layout } = body || {};
+    itemName = (itemName || '').toString().trim();
+    if (!itemName) itemName = 'menu item';
+
+    const qrBuffer = decodeDataUrl(qrImageDataUrl);
+    if (!qrBuffer) {
+      return res.status(400).json({ error: 'Invalid or missing qrImageDataUrl' });
+    }
+
+    const count =
+      Math.max(1, Math.min(parseInt(labelsPerSheet || '6', 10) || 6, 6));
+
+    // Layout hints (with defaults)
+    const cfg = layout || {};
+    const outerPaddingInches = Number(cfg.outerPaddingInches ?? 0.25); // not strictly needed here
+    const gapBetweenTextAndQrInches = Number(cfg.gapBetweenTextAndQrInches ?? 0.25);
+    const qrSizeInches = Number(cfg.qrSizeInches ?? 1);
+
+    // Convert inches to points
+    const inch = 72;
+    const qrSize = qrSizeInches * inch;                         // 1" -> 72 pts
+    const gapBetweenTextAndQr = gapBetweenTextAndQrInches * inch; // 0.25" -> 18 pts
+    const innerPadding = 0.25 * inch;                           // 1/4" padding inside label
+
+    // PDF setup
+    const doc = new PDFDocument({
+      size: 'LETTER',  // 612 x 792
+      margin: outerPaddingInches * inch  // at least 1/4" around the sheet
+    });
+
+    const chunks = [];
+    doc.on('data', (c) => chunks.push(c));
+    doc.on('end', () => {
+      const pdf = Buffer.concat(chunks);
+      const safeName = itemName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'pid';
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="pid-qr-6up-${safeName}.pdf"`
+      );
+      res.status(200).send(pdf);
+    });
+
+    // Geometry: Letter + 6 labels (2 columns x 3 rows)
+    const pageWidth = doc.page.width;   // 612
+    const pageHeight = doc.page.height; // 792
+
+    const pidWidth = 3 * inch;   // 3"
+    const pidHeight = 3 * inch;  // 3"
+    const gap = 0.5 * inch;      // 0.5" between labels
+
+    // center the 2x3 grid on the page
+    const totalLabelsWidth = pidWidth * 2 + gap;
+    const totalLabelsHeight = pidHeight * 3 + gap * 2;
+
+    const leftRightMargin = (pageWidth - totalLabelsWidth) / 2;
+    const topBottomMargin = (pageHeight - totalLabelsHeight) / 2;
+
+    function drawLabelWithQr(x, y, text) {
+      // Optional debug: outline box
+      // doc.rect(x, y, pidWidth, pidHeight).stroke();
+
+      const contentX = x + innerPadding;
+      const contentY = y + innerPadding;
+      const contentWidth = pidWidth - innerPadding * 2;
+      const contentHeight = pidHeight - innerPadding * 2;
+
+      const textWidth = contentWidth - qrSize - gapBetweenTextAndQr;
+      const qrX = contentX + textWidth + gapBetweenTextAndQr;
+
+      // vertical center line (for both text block + QR)
+      const centerY = y + pidHeight / 2;
+
+      doc.font('Helvetica-Bold').fontSize(14);
+      const textOptions = {
+        width: textWidth,
+        align: 'left',
+        lineBreak: true
+      };
+
+      let textHeight;
+      try {
+        textHeight = doc.heightOfString(text, textOptions);
+      } catch (e) {
+        textHeight = 14;
+      }
+      if (textHeight > contentHeight) textHeight = contentHeight;
+
+      let textTop = centerY - textHeight / 2;
+      // Clamp into content area
+      if (textTop < contentY) textTop = contentY;
+      if (textTop + textHeight > contentY + contentHeight) {
+        textTop = contentY + contentHeight - textHeight;
+      }
+
+      // Draw text
+      doc.save();
+      doc.rect(contentX, contentY, textWidth, contentHeight).clip();
+      doc.fillColor('black').text(text, contentX, textTop, textOptions);
+      doc.restore();
+
+      // Draw QR, vertically centered
+      let qrY = centerY - qrSize / 2;
+      if (qrY < contentY) qrY = contentY;
+      if (qrY + qrSize > contentY + contentHeight) {
+        qrY = contentY + contentHeight - qrSize;
+      }
+
+      try {
+        doc.image(qrBuffer, qrX, qrY, { width: qrSize, height: qrSize });
+      } catch (e) {
+        console.error('Error drawing QR:', e);
+      }
+    }
+
+    // Draw up to 6 labels (2 cols x 3 rows)
+    for (let i = 0; i < count; i++) {
+      const row = Math.floor(i / 2);
+      const col = i % 2;
+
+      const x = leftRightMargin + col * (pidWidth + gap);
+      const y = topBottomMargin + row * (pidHeight + gap);
+
+      drawLabelWithQr(x, y, itemName);
+    }
+
+    doc.end();
+  } catch (error) {
+    console.error('Error generating QR PID:', error);
+    res.status(500).json({
+      error: 'Failed to generate QR PID',
+      details: error.message
+    });
+  }
+};
+
+// Force Node runtime (PDFKit needs Node, not Edge)
+module.exports.config = { runtime: 'nodejs18.x' };// JavaScript Document
