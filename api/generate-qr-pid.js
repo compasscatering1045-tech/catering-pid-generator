@@ -29,7 +29,7 @@ function decodeDataUrl(dataUrl) {
 }
 
 module.exports = async (req, res) => {
-  // CORS (same pattern as your other APIs)
+  // CORS (similar style to your other APIs)
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader(
@@ -57,7 +57,7 @@ module.exports = async (req, res) => {
     let { items, layout } = body || {};
     if (!Array.isArray(items)) items = [];
 
-    // Keep only rows that have BOTH name and QR
+    // Keep only rows that have BOTH itemName and qrImageDataUrl
     const cleaned = items
       .map((it) => ({
         itemName: (it.itemName || '').toString().trim(),
@@ -69,23 +69,22 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'No valid items provided' });
     }
 
-    // NO slicing: support any number of labels
-    const labels = cleaned;
+    const labels = cleaned; // allow any number of labels
 
     // Layout hints (with defaults)
     const cfg = layout || {};
     const inch = 72;
-    const outerPaddingInches          = Number(cfg.outerPaddingInches ?? 0.25);
-    const gapBetweenTextAndQrInches   = Number(cfg.gapBetweenTextAndQrInches ?? 0.25);
-    const qrSizeInches                = Number(cfg.qrSizeInches ?? 1);
+    const outerPaddingInches        = Number(cfg.outerPaddingInches ?? 0.25);
+    const gapBetweenTextAndQrInches = Number(cfg.gapBetweenTextAndQrInches ?? 0.25);
+    const qrSizeInches              = Number(cfg.qrSizeInches ?? 1);
 
     const qrSize            = qrSizeInches * inch;                // 1" -> 72 pts
     const gapBetweenTextAndQr = gapBetweenTextAndQrInches * inch; // 0.25" -> 18 pts
-    const innerPadding      = 0.25 * inch;                        // 1/4" inside label
+    const innerPadding      = 0.25 * inch;                        // 1/4" padding inside each label
 
     // PDF setup
     const doc = new PDFDocument({
-      size: 'LETTER',  // 612 x 792
+      size: 'LETTER',                 // 612 x 792
       margin: outerPaddingInches * inch
     });
 
@@ -102,34 +101,36 @@ module.exports = async (req, res) => {
       res.status(200).send(pdf);
     });
 
-    // Geometry: Letter + labels (2 cols x 3 rows per page), 3"x3" each
-    const pageWidth = doc.page.width;   // 612
-    const pageHeight = doc.page.height; // 792
+    // Geometry: Letter + labels (2 cols x 3 rows per page), 3" x 3" each
+    const pageWidth  = doc.page.width;   // 612
+    const pageHeight = doc.page.height;  // 792
 
-    const pidWidth = 3 * inch;
+    const pidWidth  = 3 * inch;
     const pidHeight = 3 * inch;
-    const gap = 0.5 * inch;            // 0.5" between labels
+    const gap       = 0.5 * inch;        // 0.5" between labels
 
-    const totalLabelsWidth = pidWidth * 2 + gap;
+    const totalLabelsWidth  = pidWidth * 2 + gap;
     const totalLabelsHeight = pidHeight * 3 + gap * 2;
 
-    const leftRightMargin = (pageWidth - totalLabelsWidth) / 2;
-    const topBottomMargin = (pageHeight - totalLabelsHeight) / 2;
+    const leftRightMargin  = (pageWidth  - totalLabelsWidth)  / 2;
+    const topBottomMargin  = (pageHeight - totalLabelsHeight) / 2;
 
     function drawLabelWithQr(x, y, text, qrBuffer) {
       if (!qrBuffer) return;
 
       const contentX = x + innerPadding;
       const contentY = y + innerPadding;
-      const contentWidth = pidWidth - innerPadding * 2;
+      const contentWidth  = pidWidth  - innerPadding * 2;
       const contentHeight = pidHeight - innerPadding * 2;
 
+      // Split horizontal: text (left) + 1/4" gap + 1" QR
       const textWidth = contentWidth - qrSize - gapBetweenTextAndQr;
-      const qrX = contentX + textWidth + gapBetweenTextAndQr;
+      const qrX       = contentX + textWidth + gapBetweenTextAndQr;
 
       const centerY = y + pidHeight / 2;
 
       doc.font('Helvetica-Bold').fontSize(14);
+
       const textOptions = {
         width: textWidth,
         align: 'left',
@@ -150,13 +151,13 @@ module.exports = async (req, res) => {
         textTop = contentY + contentHeight - textHeight;
       }
 
-      // Text (left)
+      // Draw text (left)
       doc.save();
       doc.rect(contentX, contentY, textWidth, contentHeight).clip();
       doc.fillColor('black').text(text, contentX, textTop, textOptions);
       doc.restore();
 
-      // QR (right), 1" x 1"
+      // Draw QR (right), 1" x 1"
       let qrY = centerY - qrSize / 2;
       if (qrY < contentY) qrY = contentY;
       if (qrY + qrSize > contentY + contentHeight) {
@@ -177,9 +178,9 @@ module.exports = async (req, res) => {
         doc.addPage();
       }
 
-      const indexOnPage = i % 6;         // 0..5
-      const row = Math.floor(indexOnPage / 2); // 0..2
-      const col = indexOnPage % 2;       // 0..1
+      const indexOnPage = i % 6;            // 0..5
+      const row         = Math.floor(indexOnPage / 2); // 0..2
+      const col         = indexOnPage % 2;  // 0..1
 
       const x = leftRightMargin + col * (pidWidth + gap);
       const y = topBottomMargin + row * (pidHeight + gap);
