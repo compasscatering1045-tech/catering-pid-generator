@@ -29,7 +29,7 @@ function decodeDataUrl(dataUrl) {
 }
 
 module.exports = async (req, res) => {
-  // CORS (similar to your generate-simple)
+  // CORS (same pattern as your other APIs)
   res.setHeader('Access-Control-Allow-Credentials', true);
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader(
@@ -69,20 +69,19 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'No valid items provided' });
     }
 
-    // At most 6 per page
-    const MAX_LABELS = 6;
-    const labels = cleaned.slice(0, MAX_LABELS);
+    // NO slicing: support any number of labels
+    const labels = cleaned;
 
     // Layout hints (with defaults)
     const cfg = layout || {};
     const inch = 72;
-    const outerPaddingInches = Number(cfg.outerPaddingInches ?? 0.25);
-    const gapBetweenTextAndQrInches = Number(cfg.gapBetweenTextAndQrInches ?? 0.25);
-    const qrSizeInches = Number(cfg.qrSizeInches ?? 1);
+    const outerPaddingInches          = Number(cfg.outerPaddingInches ?? 0.25);
+    const gapBetweenTextAndQrInches   = Number(cfg.gapBetweenTextAndQrInches ?? 0.25);
+    const qrSizeInches                = Number(cfg.qrSizeInches ?? 1);
 
-    const qrSize = qrSizeInches * inch;                 // 1" -> 72 pts
+    const qrSize            = qrSizeInches * inch;                // 1" -> 72 pts
     const gapBetweenTextAndQr = gapBetweenTextAndQrInches * inch; // 0.25" -> 18 pts
-    const innerPadding = 0.25 * inch;                   // 1/4" padding inside label
+    const innerPadding      = 0.25 * inch;                        // 1/4" inside label
 
     // PDF setup
     const doc = new PDFDocument({
@@ -103,7 +102,7 @@ module.exports = async (req, res) => {
       res.status(200).send(pdf);
     });
 
-    // Geometry: Letter + 6 labels (2 cols x 3 rows), 3"x3" each
+    // Geometry: Letter + labels (2 cols x 3 rows per page), 3"x3" each
     const pageWidth = doc.page.width;   // 612
     const pageHeight = doc.page.height; // 792
 
@@ -157,7 +156,7 @@ module.exports = async (req, res) => {
       doc.fillColor('black').text(text, contentX, textTop, textOptions);
       doc.restore();
 
-      // QR (right), 1"x1"
+      // QR (right), 1" x 1"
       let qrY = centerY - qrSize / 2;
       if (qrY < contentY) qrY = contentY;
       if (qrY + qrSize > contentY + contentHeight) {
@@ -171,10 +170,17 @@ module.exports = async (req, res) => {
       }
     }
 
-    // Draw up to 6 labels (each unique)
+    // 6 labels per page: 2 columns x 3 rows
     for (let i = 0; i < labels.length; i++) {
-      const row = Math.floor(i / 2); // 0..2
-      const col = i % 2;            // 0..1
+      // Start a new page at label 7, 13, 19, ...
+      if (i > 0 && i % 6 === 0) {
+        doc.addPage();
+      }
+
+      const indexOnPage = i % 6;         // 0..5
+      const row = Math.floor(indexOnPage / 2); // 0..2
+      const col = indexOnPage % 2;       // 0..1
+
       const x = leftRightMargin + col * (pidWidth + gap);
       const y = topBottomMargin + row * (pidHeight + gap);
 
