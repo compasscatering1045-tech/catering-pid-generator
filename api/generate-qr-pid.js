@@ -54,67 +54,71 @@ module.exports = async (req, res) => {
   try {
     const body = await parseBody(req);
 
-    let { itemName, qrImageDataUrl, labelsPerSheet, layout } = body || {};
-    itemName = (itemName || '').toString().trim();
-    if (!itemName) itemName = 'menu item';
+    let { items, layout } = body || {};
+    if (!Array.isArray(items)) items = [];
 
-    const qrBuffer = decodeDataUrl(qrImageDataUrl);
-    if (!qrBuffer) {
-      return res.status(400).json({ error: 'Invalid or missing qrImageDataUrl' });
+    // Keep only rows that have BOTH name and QR
+    const cleaned = items
+      .map((it) => ({
+        itemName: (it.itemName || '').toString().trim(),
+        qrImageDataUrl: it.qrImageDataUrl || ''
+      }))
+      .filter((it) => it.itemName && it.qrImageDataUrl);
+
+    if (!cleaned.length) {
+      return res.status(400).json({ error: 'No valid items provided' });
     }
 
-    const count =
-      Math.max(1, Math.min(parseInt(labelsPerSheet || '6', 10) || 6, 6));
+    // At most 6 per page
+    const MAX_LABELS = 6;
+    const labels = cleaned.slice(0, MAX_LABELS);
 
     // Layout hints (with defaults)
     const cfg = layout || {};
-    const outerPaddingInches = Number(cfg.outerPaddingInches ?? 0.25); // not strictly needed here
+    const inch = 72;
+    const outerPaddingInches = Number(cfg.outerPaddingInches ?? 0.25);
     const gapBetweenTextAndQrInches = Number(cfg.gapBetweenTextAndQrInches ?? 0.25);
     const qrSizeInches = Number(cfg.qrSizeInches ?? 1);
 
-    // Convert inches to points
-    const inch = 72;
-    const qrSize = qrSizeInches * inch;                         // 1" -> 72 pts
+    const qrSize = qrSizeInches * inch;                 // 1" -> 72 pts
     const gapBetweenTextAndQr = gapBetweenTextAndQrInches * inch; // 0.25" -> 18 pts
-    const innerPadding = 0.25 * inch;                           // 1/4" padding inside label
+    const innerPadding = 0.25 * inch;                   // 1/4" padding inside label
 
     // PDF setup
     const doc = new PDFDocument({
       size: 'LETTER',  // 612 x 792
-      margin: outerPaddingInches * inch  // at least 1/4" around the sheet
+      margin: outerPaddingInches * inch
     });
 
     const chunks = [];
     doc.on('data', (c) => chunks.push(c));
     doc.on('end', () => {
       const pdf = Buffer.concat(chunks);
-      const safeName = itemName.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '') || 'pid';
+      const safeName = 'pid-qr-6up';
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="pid-qr-6up-${safeName}.pdf"`
+        `attachment; filename="${safeName}.pdf"`
       );
       res.status(200).send(pdf);
     });
 
-    // Geometry: Letter + 6 labels (2 columns x 3 rows)
+    // Geometry: Letter + 6 labels (2 cols x 3 rows), 3"x3" each
     const pageWidth = doc.page.width;   // 612
     const pageHeight = doc.page.height; // 792
 
-    const pidWidth = 3 * inch;   // 3"
-    const pidHeight = 3 * inch;  // 3"
-    const gap = 0.5 * inch;      // 0.5" between labels
+    const pidWidth = 3 * inch;
+    const pidHeight = 3 * inch;
+    const gap = 0.5 * inch;            // 0.5" between labels
 
-    // center the 2x3 grid on the page
     const totalLabelsWidth = pidWidth * 2 + gap;
     const totalLabelsHeight = pidHeight * 3 + gap * 2;
 
     const leftRightMargin = (pageWidth - totalLabelsWidth) / 2;
     const topBottomMargin = (pageHeight - totalLabelsHeight) / 2;
 
-    function drawLabelWithQr(x, y, text) {
-      // Optional debug: outline box
-      // doc.rect(x, y, pidWidth, pidHeight).stroke();
+    function drawLabelWithQr(x, y, text, qrBuffer) {
+      if (!qrBuffer) return;
 
       const contentX = x + innerPadding;
       const contentY = y + innerPadding;
@@ -124,7 +128,6 @@ module.exports = async (req, res) => {
       const textWidth = contentWidth - qrSize - gapBetweenTextAndQr;
       const qrX = contentX + textWidth + gapBetweenTextAndQr;
 
-      // vertical center line (for both text block + QR)
       const centerY = y + pidHeight / 2;
 
       doc.font('Helvetica-Bold').fontSize(14);
@@ -143,19 +146,18 @@ module.exports = async (req, res) => {
       if (textHeight > contentHeight) textHeight = contentHeight;
 
       let textTop = centerY - textHeight / 2;
-      // Clamp into content area
       if (textTop < contentY) textTop = contentY;
       if (textTop + textHeight > contentY + contentHeight) {
         textTop = contentY + contentHeight - textHeight;
       }
 
-      // Draw text
+      // Text (left)
       doc.save();
       doc.rect(contentX, contentY, textWidth, contentHeight).clip();
       doc.fillColor('black').text(text, contentX, textTop, textOptions);
       doc.restore();
 
-      // Draw QR, vertically centered
+      // QR (right), 1"x1"
       let qrY = centerY - qrSize / 2;
       if (qrY < contentY) qrY = contentY;
       if (qrY + qrSize > contentY + contentHeight) {
@@ -169,15 +171,18 @@ module.exports = async (req, res) => {
       }
     }
 
-    // Draw up to 6 labels (2 cols x 3 rows)
-    for (let i = 0; i < count; i++) {
-      const row = Math.floor(i / 2);
-      const col = i % 2;
-
+    // Draw up to 6 labels (each unique)
+    for (let i = 0; i < labels.length; i++) {
+      const row = Math.floor(i / 2); // 0..2
+      const col = i % 2;            // 0..1
       const x = leftRightMargin + col * (pidWidth + gap);
       const y = topBottomMargin + row * (pidHeight + gap);
 
-      drawLabelWithQr(x, y, itemName);
+      const { itemName, qrImageDataUrl } = labels[i];
+      const qrBuffer = decodeDataUrl(qrImageDataUrl);
+      if (!qrBuffer) continue;
+
+      drawLabelWithQr(x, y, itemName, qrBuffer);
     }
 
     doc.end();
@@ -191,4 +196,4 @@ module.exports = async (req, res) => {
 };
 
 // Force Node runtime (PDFKit needs Node, not Edge)
-module.exports.config = { runtime: 'nodejs18.x' };// JavaScript Document
+module.exports.config = { runtime: 'nodejs18.x' };
