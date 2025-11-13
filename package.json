@@ -4,6 +4,7 @@
   "description": "Generate PID labels for catering orders",
   "engines": { "node": ">=18" },
   "dependencies": {
-    "pdfkit": "^0.15.0"
+    "pdfkit": "^0.15.0",
+    "pdf-lib": "^1.17.1"
   }
 }
