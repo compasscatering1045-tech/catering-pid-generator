@@ -14,7 +14,7 @@ const INNER_PAD = 0.05 * INCH, TEXT_COLOR = rgb(0, 0, 0);
 const FONT_SIZE = 9, MIN_FONT_SIZE = 7;
 
 function setCORS(res) {
-  // If you want to lock this down: replace * with "https://catering-pid-generator.vercel.app"
+  // If you want to lock this down: replace * with your site origin
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -64,44 +64,47 @@ function wrapText(text, maxWidth, font, fontSize) {
 module.exports = async function handler(req, res) {
   setCORS(res);
 
-  if (req.method === 'OPTIONS') {
-    // Preflight success
-    return res.status(204).end();
-  }
-
-  if (req.method === 'GET') {
-    return res.status(200).send('Hotbox API OK (root /api, CORS-enabled)');
-  }
-
-  if (req.method !== 'POST') {
-    return res.status(405).send('Method not allowed');
-  }
+  if (req.method === 'OPTIONS') return res.status(204).end();
+  if (req.method === 'GET') return res.status(200).send('Hotbox API OK (root /api, CORS-enabled)');
+  if (req.method !== 'POST') return res.status(405).send('Method not allowed');
 
   try {
-    // Read raw JSON body (root Vercel function)
+    // Read raw JSON body
     const chunks = [];
     for await (const c of req) chunks.push(c);
     const bodyStr = Buffer.concat(chunks).toString('utf8');
 
+    // ----- NEW: support compact payload + legacy -----
     let items = [];
+    let images = [];
     try {
       const parsed = JSON.parse(bodyStr || '{}');
-      items = Array.isArray(parsed.items) ? parsed.items : [];
+      items  = Array.isArray(parsed.items)  ? parsed.items  : [];
+      images = Array.isArray(parsed.images) ? parsed.images : [];
     } catch {
       return res.status(400).send('Bad JSON');
     }
 
-    const clean = items.map(it => ({
-      name: (it.name || '').toString().trim().toUpperCase(),
-      qrDataUrl: (it.qrDataUrl || '').toString()
-    })).filter(it => it.name || it.qrDataUrl);
+    // Normalize to { name, qrDataUrl } and filter empties
+    const clean = items.map((it) => {
+      const name = (it.name || '').toString().trim().toUpperCase();
+      let qrDataUrl = '';
+      if (typeof it.qrRef === 'number' && images[it.qrRef]) {
+        qrDataUrl = (images[it.qrRef] || '').toString();
+      } else if (it.qrDataUrl) {
+        // legacy path
+        qrDataUrl = (it.qrDataUrl || '').toString();
+      }
+      return { name, qrDataUrl };
+    }).filter(it => it.name || it.qrDataUrl);
 
-    if (!clean.length) {
-      return res.status(400).send('No valid rows provided.');
-    }
+    if (!clean.length) return res.status(400).send('No valid rows provided.');
 
     const pdf = await PDFDocument.create();
     const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+    // Cache embedded images so repeated QR dataURLs are only embedded once
+    const imageCache = new Map(); // dataUrl -> {img, isPng}
 
     for (let i = 0; i < clean.length; i++) {
       const { pageIndex, row, col } = indexToGrid(i);
@@ -109,7 +112,7 @@ module.exports = async function handler(req, res) {
       const page = pdf.getPage(pageIndex);
       const { x, yBottom } = labelTopLeft(row, col);
 
-      // QR size: request 1.75", constrained by label height
+      // QR size: requested 1.75", constrained by label height
       const qrSize = Math.min(1.75 * INCH, LABEL_H - 2 * INNER_PAD);
       const qrX = x + LABEL_W - INNER_PAD - qrSize;
       const qrY = yBottom + (LABEL_H - qrSize) / 2;
@@ -119,6 +122,7 @@ module.exports = async function handler(req, res) {
       const textW = Math.max(0, (qrX - INNER_PAD) - textX);
       const textRect = { x: textX, y: yBottom + INNER_PAD, w: textW, h: LABEL_H - 2 * INNER_PAD };
 
+      // Draw text (center both axes)
       if (clean[i].name && textRect.w > 0 && textRect.h > 0) {
         let fs = FONT_SIZE;
         let lines = wrapText(clean[i].name, textRect.w, font, fs);
@@ -139,14 +143,20 @@ module.exports = async function handler(req, res) {
         }
       }
 
+      // Draw QR
       const dataUrl = clean[i].qrDataUrl;
       if (dataUrl && /^data:image\//i.test(dataUrl)) {
         try {
-          const b64 = (dataUrl.split(',')[1] || '');
-          const bytes = Buffer.from(b64, 'base64');
-          const isPng = /^data:image\/png/i.test(dataUrl);
-          const img = isPng ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
-          page.drawImage(img, { x: qrX, y: qrY, width: qrSize, height: qrSize });
+          let cached = imageCache.get(dataUrl);
+          if (!cached) {
+            const b64 = (dataUrl.split(',')[1] || '');
+            const bytes = Buffer.from(b64, 'base64');
+            const isPng = /^data:image\/png/i.test(dataUrl);
+            const img = isPng ? await pdf.embedPng(bytes) : await pdf.embedJpg(bytes);
+            cached = { img, isPng };
+            imageCache.set(dataUrl, cached);
+          }
+          page.drawImage(cached.img, { x: qrX, y: qrY, width: qrSize, height: qrSize });
         } catch {
           // ignore bad image and continue
         }
@@ -160,9 +170,7 @@ module.exports = async function handler(req, res) {
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    // CORS on binary response too
     setCORS(res);
-
     return res.status(200).send(Buffer.from(pdfBytes));
   } catch (e) {
     console.error(e);
