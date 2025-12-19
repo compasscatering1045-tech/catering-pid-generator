@@ -1,17 +1,54 @@
-// api/generate-simple.js - SIMPLIFIED VERSION FOR PRICE LABELS
+// api/generate-simple.js - SIMPLIFIED VERSION FOR PRICE LABELS (UPDATED)
 const PDFDocument = require('pdfkit');
 const https = require('https');
 
 // Function to download image from URL
 function downloadImage(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, (response) => {
-      const chunks = [];
-      response.on('data', (chunk) => chunks.push(chunk));
-      response.on('end', () => resolve(Buffer.concat(chunks)));
-      response.on('error', reject);
-    });
+    https
+      .get(url, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => resolve(Buffer.concat(chunks)));
+        response.on('error', reject);
+      })
+      .on('error', reject);
   });
+}
+
+// --- helpers ---
+const toBool = (v, d = false) =>
+  typeof v === 'boolean' ? v :
+  typeof v === 'string'  ? v.toLowerCase() === 'true' : d;
+
+/**
+ * Accepts:
+ *  - "0.72" -> 0.72
+ *  - "0.72/oz" -> 0.72
+ *  - " 0.72 /oz " -> 0.72
+ * Returns: Number or NaN
+ */
+function parsePricePerOz(raw) {
+  if (raw === null || raw === undefined) return NaN;
+  let s = String(raw).trim();
+
+  // strip whitespace, commas -> dots
+  s = s.replace(/\s+/g, '').replace(/,/g, '.');
+
+  // remove trailing "/oz" if present (prevents "/oz/oz")
+  s = s.replace(/\/oz$/i, '');
+
+  // keep digits + dot only
+  s = s.replace(/[^0-9.]/g, '');
+
+  // collapse multiple dots (e.g. "1.2.3" -> "1.23")
+  const parts = s.split('.');
+  if (parts.length > 2) s = parts[0] + '.' + parts.slice(1).join('');
+
+  if (!s) return NaN;
+
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
 }
 
 module.exports = async (req, res) => {
@@ -35,29 +72,53 @@ module.exports = async (req, res) => {
   }
 
   try {
-    const { orderData } = req.body;
-    
+    // Vercel usually parses JSON, but be safe if req.body is a string
+    let body = req.body;
+    if (typeof body === 'string') {
+      try { body = JSON.parse(body); } catch { body = {}; }
+    }
+
+    const { orderData } = body || {};
+
     if (!orderData) {
       return res.status(400).json({ error: 'Missing orderData in request body' });
     }
 
     // Parse menu items
-    const menuLines = orderData.menuItems.split('\n').map(item => {
-      return item.trim().toLowerCase();
-    }).filter(item => item.length > 0);
+    const menuLines = String(orderData.menuItems || '')
+      .split('\n')
+      .map((item) => item.trim().toLowerCase())
+      .filter((item) => item.length > 0);
 
-    // Get price per oz
-    const pricePerOz = orderData.pricePerOz || '0.00';
-    const formattedPrice = `${pricePerOz}/oz`;
+    if (!menuLines.length) {
+      return res.status(400).json({ error: 'No menu items provided' });
+    }
 
-    // Check if background should be enabled (default is false)
-    const enableBackground = orderData.enableBackground || false;
+    // --- PRICE LOGIC (FIXED) ---
+    // Frontend should send: enablePrice: true/false
+    // If enablePrice is false => DO NOT PRINT PRICE (no 0.00/oz)
+    // If enablePrice is true and price parses => PRINT "0.72/oz" (no /oz/oz)
+    const enablePrice = toBool(orderData.enablePrice, true);
+    const priceNum = enablePrice ? parsePricePerOz(orderData.pricePerOz) : NaN;
+    const shouldPrintPrice = enablePrice && Number.isFinite(priceNum);
+
+    // Format only when printing
+    const formattedPrice = shouldPrintPrice ? `${priceNum.toFixed(2)}/oz` : '';
+
+    // Background toggle
+    const enableBackground = toBool(orderData.enableBackground, false);
 
     // Download background image only if enabled
     let backgroundImage = null;
     if (enableBackground) {
-      const backgroundUrl = 'https://raw.githubusercontent.com/compasscatering1045-tech/catering-pid-generator/main/background.png';
-      backgroundImage = await downloadImage(backgroundUrl);
+      const backgroundUrl =
+        'https://raw.githubusercontent.com/compasscatering1045-tech/catering-pid-generator/main/background.png';
+      try {
+        backgroundImage = await downloadImage(backgroundUrl);
+      } catch (e) {
+        console.error('downloadImage failed:', e?.message || e);
+        backgroundImage = null;
+      }
     }
 
     // Create PDF
@@ -68,21 +129,19 @@ module.exports = async (req, res) => {
 
     // Buffer to collect PDF data
     const chunks = [];
-    doc.on('data', chunk => chunks.push(chunk));
+    doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => {
       const pdfBuffer = Buffer.concat(chunks);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="pid-simple-labels.pdf"`);
+      res.setHeader('Content-Disposition', 'attachment; filename="pid-simple-labels.pdf"');
       res.status(200).send(pdfBuffer);
     });
 
-    // PDF dimensions
-    const pageWidth = 612; // 8.5 inches in points
-    const pageHeight = 792; // 11 inches in points
+    // PDF dimensions (LETTER)
     const leftRightMargin = 72; // 1 inch margins on left and right
     const topBottomMargin = 36; // 0.5 inch margins on top and bottom
-    const pidWidth = 216; // 3 inches in points (3 * 72)
-    const pidHeight = 216; // 3 inches in points (3 * 72)
+    const pidWidth = 216; // 3 inches in points
+    const pidHeight = 216; // 3 inches in points
     const gap = 36; // 0.5 inch gap between PIDs
 
     // Draw 6 PIDs (2 columns x 3 rows)
@@ -90,68 +149,54 @@ module.exports = async (req, res) => {
       for (let col = 0; col < 2; col++) {
         const x = leftRightMargin + col * (pidWidth + gap);
         const y = topBottomMargin + row * (pidHeight + gap);
+
         const menuIndex = (row * 2 + col) % menuLines.length;
         const menuItem = menuLines[menuIndex] || '';
-
-        // Skip if no menu item
         if (!menuItem) continue;
 
         // Add background image only if enabled
         if (enableBackground && backgroundImage) {
           doc.save();
-          
-          // Set clipping region to PID bounds
           doc.rect(x, y, pidWidth, pidHeight).clip();
-          
-          // Place background image
           try {
-            doc.image(backgroundImage, x, y, {
-              width: pidWidth,
-              height: pidHeight
-            });
+            doc.image(backgroundImage, x, y, { width: pidWidth, height: pidHeight });
           } catch (imgError) {
             console.error('Error adding image:', imgError);
           }
-          
           doc.restore();
         }
 
         // Text positioning
-        // 1 inch from top of PID for menu item
-        const itemY = y + 72; // 72 points = 1 inch
-        // 1/2 inch below that for price
-        const priceY = itemY + 36; // 36 points = 0.5 inch
+        // Menu item around 40% down from top (instead of 50%)
+        const itemY = y + Math.round(pidHeight * 0.40);
+
+        // Price shown below item only if enabled & valid
+        const priceY = itemY + 28; // tighter than 0.5" to look nicer
 
         // Add menu item name - 14pt bold
         doc.fillColor('black')
-           .font('Helvetica-Bold')
-           .fontSize(14)
-           .text(menuItem, 
-                 x,
-                 itemY,
-                 {
-                   width: pidWidth,
-                   align: 'center',
-                   lineBreak: true
-                 });
+          .font('Helvetica-Bold')
+          .fontSize(14)
+          .text(menuItem, x, itemY, {
+            width: pidWidth,
+            align: 'center',
+            lineBreak: true
+          });
 
-        // Add price below - centered
-        doc.fillColor('#333')
-           .font('Helvetica')
-           .fontSize(12)
-           .text(formattedPrice,
-                 x,
-                 priceY,
-                 {
-                   width: pidWidth,
-                   align: 'center'
-                 });
+        // Add price below - centered (ONLY when shouldPrintPrice)
+        if (shouldPrintPrice) {
+          doc.fillColor('#333')
+            .font('Helvetica')
+            .fontSize(12)
+            .text(formattedPrice, x, priceY, {
+              width: pidWidth,
+              align: 'center'
+            });
+        }
       }
     }
 
-    // Finalize PDF
     doc.end();
-
   } catch (error) {
     console.error('Error generating PID:', error);
     res.status(500).json({ error: 'Failed to generate PID', details: error.message });
