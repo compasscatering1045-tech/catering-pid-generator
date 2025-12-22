@@ -1,4 +1,4 @@
-// api/generate-simple.js - SIMPLIFIED VERSION FOR PRICE LABELS (UPDATED)
+// api/generate-simple.js - SIMPLIFIED VERSION FOR PRICE LABELS (AUTO-PAGINATE, NO REPEATS)
 const PDFDocument = require('pdfkit');
 const https = require('https');
 
@@ -25,7 +25,6 @@ const toBool = (v, d = false) =>
  * Accepts:
  *  - "0.72" -> 0.72
  *  - "0.72/oz" -> 0.72
- *  - " 0.72 /oz " -> 0.72
  * Returns: Number or NaN
  */
 function parsePricePerOz(raw) {
@@ -79,7 +78,6 @@ module.exports = async (req, res) => {
     }
 
     const { orderData } = body || {};
-
     if (!orderData) {
       return res.status(400).json({ error: 'Missing orderData in request body' });
     }
@@ -94,15 +92,10 @@ module.exports = async (req, res) => {
       return res.status(400).json({ error: 'No menu items provided' });
     }
 
-    // --- PRICE LOGIC (FIXED) ---
-    // Frontend should send: enablePrice: true/false
-    // If enablePrice is false => DO NOT PRINT PRICE (no 0.00/oz)
-    // If enablePrice is true and price parses => PRINT "0.72/oz" (no /oz/oz)
+    // --- PRICE LOGIC ---
     const enablePrice = toBool(orderData.enablePrice, true);
     const priceNum = enablePrice ? parsePricePerOz(orderData.pricePerOz) : NaN;
     const shouldPrintPrice = enablePrice && Number.isFinite(priceNum);
-
-    // Format only when printing
     const formattedPrice = shouldPrintPrice ? `${priceNum.toFixed(2)}/oz` : '';
 
     // Background toggle
@@ -127,7 +120,6 @@ module.exports = async (req, res) => {
       margin: 36 // 0.5 inch margins
     });
 
-    // Buffer to collect PDF data
     const chunks = [];
     doc.on('data', (chunk) => chunks.push(chunk));
     doc.on('end', () => {
@@ -137,63 +129,65 @@ module.exports = async (req, res) => {
       res.status(200).send(pdfBuffer);
     });
 
-    // PDF dimensions (LETTER)
-    const leftRightMargin = 72; // 1 inch margins on left and right
-    const topBottomMargin = 36; // 0.5 inch margins on top and bottom
-    const pidWidth = 216; // 3 inches in points
-    const pidHeight = 216; // 3 inches in points
-    const gap = 36; // 0.5 inch gap between PIDs
+    // Geometry (LETTER) — 2 cols x 3 rows per page
+    const leftRightMargin = 72;
+    const topBottomMargin = 36;
+    const pidWidth = 216;   // 3"
+    const pidHeight = 216;  // 3"
+    const gap = 36;
+    const perPage = 6;
 
-    // Draw 6 PIDs (2 columns x 3 rows)
-    for (let row = 0; row < 3; row++) {
-      for (let col = 0; col < 2; col++) {
-        const x = leftRightMargin + col * (pidWidth + gap);
-        const y = topBottomMargin + row * (pidHeight + gap);
+    // Helper: draw a single PID at position
+    function drawPid(x, y, menuItem) {
+      if (!menuItem) return;
 
-        const menuIndex = (row * 2 + col) % menuLines.length;
-        const menuItem = menuLines[menuIndex] || '';
-        if (!menuItem) continue;
-
-        // Add background image only if enabled
-        if (enableBackground && backgroundImage) {
-          doc.save();
-          doc.rect(x, y, pidWidth, pidHeight).clip();
-          try {
-            doc.image(backgroundImage, x, y, { width: pidWidth, height: pidHeight });
-          } catch (imgError) {
-            console.error('Error adding image:', imgError);
-          }
-          doc.restore();
+      if (enableBackground && backgroundImage) {
+        doc.save();
+        doc.rect(x, y, pidWidth, pidHeight).clip();
+        try {
+          doc.image(backgroundImage, x, y, { width: pidWidth, height: pidHeight });
+        } catch (imgError) {
+          console.error('Error adding image:', imgError);
         }
-
-        // Text positioning
-        // Menu item around 40% down from top (instead of 50%)
-        const itemY = y + Math.round(pidHeight * 0.40);
-
-        // Price shown below item only if enabled & valid
-        const priceY = itemY + 28; // tighter than 0.5" to look nicer
-
-        // Add menu item name - 14pt bold
-        doc.fillColor('black')
-          .font('Helvetica-Bold')
-          .fontSize(14)
-          .text(menuItem, x, itemY, {
-            width: pidWidth,
-            align: 'center',
-            lineBreak: true
-          });
-
-        // Add price below - centered (ONLY when shouldPrintPrice)
-        if (shouldPrintPrice) {
-          doc.fillColor('#333')
-            .font('Helvetica')
-            .fontSize(12)
-            .text(formattedPrice, x, priceY, {
-              width: pidWidth,
-              align: 'center'
-            });
-        }
+        doc.restore();
       }
+
+      // Menu around 40% down from top
+      const itemY = y + Math.round(pidHeight * 0.40);
+      const priceY = itemY + 28;
+
+      doc.fillColor('black')
+        .font('Helvetica-Bold')
+        .fontSize(14)
+        .text(menuItem, x, itemY, {
+          width: pidWidth,
+          align: 'center',
+          lineBreak: true
+        });
+
+      if (shouldPrintPrice) {
+        doc.fillColor('#333')
+          .font('Helvetica')
+          .fontSize(12)
+          .text(formattedPrice, x, priceY, {
+            width: pidWidth,
+            align: 'center'
+          });
+      }
+    }
+
+    // ✅ Auto-pagination: iterate all items; add pages every 6 labels
+    for (let i = 0; i < menuLines.length; i++) {
+      if (i > 0 && i % perPage === 0) doc.addPage();
+
+      const slot = i % perPage;       // 0..5 within current page
+      const row = Math.floor(slot / 2);
+      const col = slot % 2;
+
+      const x = leftRightMargin + col * (pidWidth + gap);
+      const y = topBottomMargin + row * (pidHeight + gap);
+
+      drawPid(x, y, menuLines[i]);
     }
 
     doc.end();
