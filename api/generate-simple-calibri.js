@@ -145,7 +145,7 @@ module.exports = async (req, res) => {
 
       // ✅ MENU: Calibri Bold 20
       doc.fillColor('black')
-        .font('Calibri-Bold')
+        .font('Calibri')
         .fontSize(20)
         .text(menuItem, x, itemY, {
           width: pidWidth,
