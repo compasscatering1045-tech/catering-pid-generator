@@ -22,7 +22,7 @@ const INNER_PAD = 0.08 * INCH;
 const TEXT_COLOR = rgb(0, 0, 0);
 
 // Bigger starting size, auto-shrink if needed
-const FONT_SIZE = 16;
+const FONT_SIZE = 14;
 const MIN_FONT_SIZE = 9;
 
 // Fixed QR size (do not shrink)
@@ -132,7 +132,7 @@ module.exports = async function handler(req, res) {
     if (!clean.length) return res.status(400).send('No valid rows provided.');
 
     const pdf = await PDFDocument.create();
-    const font = await pdf.embedFont(StandardFonts.Helvetica);
+    const font = await pdf.embedFont(StandardFonts.Calibri);
 
     // Cache embedded images for repeated QR codes
     const imageCache = new Map();
