@@ -21,7 +21,7 @@ const ROW_GAP = 0.0 * INCH;
 const INNER_PAD = 0.06 * INCH;
 const TEXT_COLOR = rgb(0, 0, 0);
 
-const FONT_SIZE = 9;
+const FONT_SIZE = 12;
 const MIN_FONT_SIZE = 7;
 
 const QR_SIZE_INCH = 0.85;        // fixed QR size (do not shrink)
