@@ -22,7 +22,7 @@ const INNER_PAD = 0.08 * INCH;
 const TEXT_COLOR = rgb(0, 0, 0);
 
 // Bigger starting size, auto-shrink if needed
-const FONT_SIZE = 17;
+const FONT_SIZE = 16;
 const MIN_FONT_SIZE = 9;
 
 // Fixed QR size (do not shrink)
