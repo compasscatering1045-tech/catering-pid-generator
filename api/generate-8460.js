@@ -132,7 +132,7 @@ module.exports = async function handler(req, res) {
     if (!clean.length) return res.status(400).send('No valid rows provided.');
 
     const pdf = await PDFDocument.create();
-    const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+    const font = await pdf.embedFont(StandardFonts.Helvetica);
 
     // Cache embedded images for repeated QR codes
     const imageCache = new Map();
