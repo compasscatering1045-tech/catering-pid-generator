@@ -18,15 +18,25 @@ const MARGIN_B = 0.5 * INCH;
 const COL_GAP = 0.125 * INCH;
 const ROW_GAP = 0.0 * INCH;
 
-const INNER_PAD = 0.06 * INCH;
+const INNER_PAD = 0.08 * INCH;
 const TEXT_COLOR = rgb(0, 0, 0);
 
-const FONT_SIZE = 14;
-const MIN_FONT_SIZE = 7;
+// Bigger starting size, auto-shrink if needed
+const FONT_SIZE = 17;
+const MIN_FONT_SIZE = 9;
 
-const QR_SIZE_INCH = 0.85;        // fixed QR size (do not shrink)
+// Fixed QR size (do not shrink)
+const QR_SIZE_INCH = 0.80;
 const QR_SIZE = QR_SIZE_INCH * INCH;
-const GAP_TEXT_QR = 0.25 * INCH;  // was 0.10
+
+// Increase this to make the text area narrower (encourages 3-line wrap)
+const GAP_TEXT_QR = 0.14 * INCH;
+
+// Allow up to 3 lines
+const MAX_LINES = 3;
+
+// Slightly tighter line-height helps fit 3 lines in a 1" label
+const LINE_HEIGHT_MULT = 1.12;
 
 function setCORS(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -53,13 +63,17 @@ function wrapText(text, maxWidth, font, fontSize) {
   const words = text.split(/\s+/).filter(Boolean);
   const lines = [];
   let line = '';
+
   for (const w of words) {
     const test = line ? line + ' ' + w : w;
+
     if (font.widthOfTextAtSize(test, fontSize) <= maxWidth) {
       line = test;
     } else {
       if (line) lines.push(line);
+
       if (font.widthOfTextAtSize(w, fontSize) > maxWidth) {
+        // If a single word is too wide, hard-break it
         let acc = '';
         for (const ch of w) {
           if (font.widthOfTextAtSize(acc + ch, fontSize) <= maxWidth) acc += ch;
@@ -71,6 +85,7 @@ function wrapText(text, maxWidth, font, fontSize) {
       }
     }
   }
+
   if (line) lines.push(line);
   return lines;
 }
@@ -102,11 +117,15 @@ module.exports = async function handler(req, res) {
     const clean = items.map((it) => {
       const name = (it.name || '').toString().trim().toUpperCase();
       let qrDataUrl = '';
+
+      // Preferred: compressed payload { items: [{name, qrRef}], images: [dataUrl...] }
       if (typeof it.qrRef === 'number' && images[it.qrRef]) {
         qrDataUrl = (images[it.qrRef] || '').toString();
       } else if (it.qrDataUrl) {
+        // Backward-compatible: direct dataUrl per item
         qrDataUrl = (it.qrDataUrl || '').toString();
       }
+
       return { name, qrDataUrl };
     }).filter(it => it.name || it.qrDataUrl);
 
@@ -124,15 +143,20 @@ module.exports = async function handler(req, res) {
       const page = pdf.getPage(pageIndex);
       const { x, yBottom } = labelTopLeft(row, col);
 
-      // QR (fixed size), vertically centered
-      const qrSize = Math.min(QR_SIZE, LABEL_H - 2 * INNER_PAD); // still protect against edge cases
+      // QR (fixed size), TOP aligned like your sample
+      const qrSize = Math.min(QR_SIZE, LABEL_H - 2 * INNER_PAD);
       const qrX = x + LABEL_W - INNER_PAD - qrSize;
-      const qrY = yBottom + (LABEL_H - qrSize) / 2;
+      const qrY = yBottom + LABEL_H - INNER_PAD - qrSize;
 
       // Text area left of QR
       const textX = x + INNER_PAD;
       const textW = Math.max(0, (qrX - GAP_TEXT_QR) - textX);
-      const textRect = { x: textX, y: yBottom + INNER_PAD, w: textW, h: LABEL_H - 2 * INNER_PAD };
+      const textRect = {
+        x: textX,
+        y: yBottom + INNER_PAD,
+        w: textW,
+        h: LABEL_H - 2 * INNER_PAD
+      };
 
       const label = clean[i];
 
@@ -140,23 +164,25 @@ module.exports = async function handler(req, res) {
         let fs = FONT_SIZE;
         let lines = wrapText(label.name, textRect.w, font, fs);
 
-        const fitsTwoLines = (s, lns) => (lns.length <= 2) && (lns.length * s * 1.15 <= textRect.h);
+        const fitsNLines = (s, lns) =>
+          (lns.length <= MAX_LINES) && (lns.length * s * LINE_HEIGHT_MULT <= textRect.h);
 
-        while (!fitsTwoLines(fs, lines) && fs > MIN_FONT_SIZE) {
+        while (!fitsNLines(fs, lines) && fs > MIN_FONT_SIZE) {
           fs -= 0.5;
           lines = wrapText(label.name, textRect.w, font, fs);
         }
-        if (lines.length > 2) lines = lines.slice(0, 2);
 
-        const lh = fs * 1.15;
-        const blockH = lines.length * lh;
-        let baseY = textRect.y + (textRect.h - blockH) / 2 + (lines.length - 1) * lh;
+        if (lines.length > MAX_LINES) lines = lines.slice(0, MAX_LINES);
+
+        const lh = fs * LINE_HEIGHT_MULT;
+
+        // TOP aligned text block (not vertically centered), left-justified
+        let baseY = yBottom + LABEL_H - INNER_PAD - fs;
 
         for (let k = 0; k < lines.length; k++) {
           const txt = lines[k];
-          const w = font.widthOfTextAtSize(txt, fs);
-          const tx = textRect.x; // left-justified
-          const ty = baseY - k * lh;                      // centered vertically as a block
+          const tx = textRect.x;     // left justify
+          const ty = baseY - k * lh; // down each line
           page.drawText(txt, { x: tx, y: ty, size: fs, font, color: TEXT_COLOR });
         }
       }
