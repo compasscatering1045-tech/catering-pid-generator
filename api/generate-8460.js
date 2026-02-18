@@ -26,7 +26,7 @@ const MIN_FONT_SIZE = 7;
 
 const QR_SIZE_INCH = 0.85;        // fixed QR size (do not shrink)
 const QR_SIZE = QR_SIZE_INCH * INCH;
-const GAP_TEXT_QR = 0.10 * INCH;  // space between text block and QR
+const GAP_TEXT_QR = 0.25 * INCH;  // was 0.10
 
 function setCORS(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -155,7 +155,7 @@ module.exports = async function handler(req, res) {
         for (let k = 0; k < lines.length; k++) {
           const txt = lines[k];
           const w = font.widthOfTextAtSize(txt, fs);
-          const tx = textRect.x + (textRect.w - w) / 2;   // centered horizontally in text block
+          const tx = textRect.x; // left-justified
           const ty = baseY - k * lh;                      // centered vertically as a block
           page.drawText(txt, { x: tx, y: ty, size: fs, font, color: TEXT_COLOR });
         }
