@@ -1,5 +1,8 @@
 // /api/generate-8460.js  (Vercel Serverless Function - CommonJS w/ CORS)
-const { PDFDocument, StandardFonts, rgb } = require('pdf-lib');
+const { PDFDocument, rgb } = require('pdf-lib');
+const fontkit = require('@pdf-lib/fontkit');
+const fs = require('fs');
+const path = require('path');
 
 const INCH = 72;
 const PAGE_W = 8.5 * INCH, PAGE_H = 11 * INCH;
@@ -132,7 +135,12 @@ module.exports = async function handler(req, res) {
     if (!clean.length) return res.status(400).send('No valid rows provided.');
 
     const pdf = await PDFDocument.create();
-    const font = await pdf.embedFont(StandardFonts.Calibri);
+    pdf.registerFontkit(fontkit);
+
+    // Embed Calibri Bold from repo
+    const fontPath = path.join(process.cwd(), 'assets', 'fonts', 'Calibri-Bold.ttf');
+    const fontBytes = fs.readFileSync(fontPath);
+    const font = await pdf.embedFont(fontBytes, { subset: true });
 
     // Cache embedded images for repeated QR codes
     const imageCache = new Map();
