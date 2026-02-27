@@ -135,7 +135,7 @@ module.exports = async (req, res) => {
     const leftRightMargin = 72, topBottomMargin = 36;
     const pidWidth = 216, pidHeight = 216; // 3" x 3"
     const gap = 36;
-    const textPaddingLR = 18; // left/right padding
+    const textPaddingLR = 24; // left/right padding
 
     // ---------- drawLabel (40% from top, centered horizontally) ----------
     const drawLabel = (x, y, text) => {
@@ -193,3 +193,4 @@ module.exports = async (req, res) => {
 
 // Force Node runtime (PDFKit needs Node, not Edge)
 module.exports.config = { runtime: 'nodejs18.x' };
+
