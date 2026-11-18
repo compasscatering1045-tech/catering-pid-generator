@@ -173,9 +173,48 @@ module.exports = async (req, res) => {
       doc.restore();
     };
 
+    // ---------- sheet header (order / room / date) in the top margin ----------
+    const formatDate = (s) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || '').trim());
+      if (!m) return String(s || '').trim();
+      const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+      return d.toLocaleDateString('en-US', {
+        weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC'
+      });
+    };
+
+    const headerParts = [];
+    const orderNo = String(orderData.orderNumber || '').trim();
+    const room    = String(orderData.room || '').trim();
+    const date    = formatDate(orderData.date);
+    if (orderNo) headerParts.push(`Order #${orderNo.replace(/^#/, '')}`);
+    if (room)    headerParts.push(`Room ${room}`);
+    if (date)    headerParts.push(date);
+
+    const totalPages = Math.ceil(labels.length / 6);
+    const headerX = leftRightMargin;
+    const headerW = pidWidth * 2 + gap;   // spans both label columns
+    const headerY = 18;                   // 0.25" from top: inside most printers' printable area
+
+    const drawHeader = (pageNum) => {
+      if (!headerParts.length) return;
+      doc.save();
+      doc.fillColor('black').font('Helvetica-Bold').fontSize(11);
+      const pageText = totalPages > 1 ? `Page ${pageNum} of ${totalPages}` : '';
+      const pageW = pageText ? doc.widthOfString(pageText) : 0;
+      doc.text(headerParts.join('   •   '), headerX, headerY, {
+        width: headerW - pageW - 12, lineBreak: false, ellipsis: true
+      });
+      if (pageText) {
+        doc.font('Helvetica').text(pageText, headerX + headerW - pageW, headerY, { lineBreak: false });
+      }
+      doc.restore();
+    };
+
     // ---------- auto-pagination ----------
     for (let i = 0; i < labels.length; i++) {
       if (i > 0 && i % 6 === 0) doc.addPage();
+      if (i % 6 === 0) drawHeader(i / 6 + 1);
       const slot = i % 6;
       const row = Math.floor(slot / 2);
       const col = slot % 2;
