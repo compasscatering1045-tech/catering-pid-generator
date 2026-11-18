@@ -194,12 +194,12 @@ module.exports = async (req, res) => {
     const totalPages = Math.ceil(labels.length / 6);
     const headerX = leftRightMargin;
     const headerW = pidWidth * 2 + gap;   // spans both label columns
-    const headerY = 18;                   // 0.25" from top: inside most printers' printable area
+    const headerY = 25;                   // ~0.35" from top; 8pt text ends just above the labels (36pt)
 
     const drawHeader = (pageNum) => {
       if (!headerParts.length) return;
       doc.save();
-      doc.fillColor('black').font('Helvetica-Bold').fontSize(11);
+      doc.fillColor('black').font('Helvetica-Bold').fontSize(8);
       const pageText = totalPages > 1 ? `Page ${pageNum} of ${totalPages}` : '';
       const pageW = pageText ? doc.widthOfString(pageText) : 0;
       doc.text(headerParts.join('   •   '), headerX, headerY, {
